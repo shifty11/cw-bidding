@@ -1,4 +1,4 @@
-use cosmwasm_std::{Addr, coin, coins, Decimal};
+use cosmwasm_std::{Addr, coin, coins};
 use cw_multi_test::App;
 
 use crate::error::ContractError;
@@ -66,10 +66,147 @@ fn instantiate_with_bid() {
     let resp: ConfigResponse = contract.query_config(&app).unwrap();
 
     assert_eq!(resp, ConfigResponse { config: Config { owner: owner.clone(), commodity } });
-    assert_eq!(app.wrap().query_all_balances(owner).unwrap(), vec![]);
+    assert_eq!(app.wrap().query_all_balances(owner.clone()).unwrap(), vec![]);
     assert_eq!(app.wrap().query_all_balances(contract.addr()).unwrap(), coins(10, ATOM));
 
     let resp: BidsResponse = contract.query_bids(&app).unwrap();
 
-    assert_eq!(resp, BidsResponse { bids: vec![Bid { address: sender, coin: coin(10, ATOM) }] });
+    assert_eq!(resp, BidsResponse { bids: vec![Bid { address: owner, coin: coin(10, ATOM) }] });
+}
+
+#[test]
+fn bid_owner_error() {
+    let owner = Addr::unchecked("owner");
+    let sender = Addr::unchecked("sender");
+
+    let mut app = App::new(|router, _api, storage| {
+        router
+            .bank
+            .init_balance(storage, &owner, coins(10, "atom"))
+            .unwrap();
+    });
+
+    let contract_id = BiddingContract::store_code(&mut app);
+
+    let contract = BiddingContract::instantiate(
+        &mut app,
+        contract_id,
+        &sender,
+        &owner,
+        None,
+        None,
+        None,
+    ).unwrap();
+
+    let err = contract
+        .make_bid(&mut app, &owner, &coins(2, ATOM))
+        .unwrap_err();
+
+    assert_eq!(err,  ContractError::OwnerCannotBid {});
+}
+
+#[test]
+fn bid_empty_bid() {
+    let owner = Addr::unchecked("owner");
+    let sender = Addr::unchecked("sender");
+
+    let mut app = App::default();
+
+    let contract_id = BiddingContract::store_code(&mut app);
+
+    let contract = BiddingContract::instantiate(
+        &mut app,
+        contract_id,
+        &sender,
+        &owner,
+        None,
+        None,
+        None,
+    ).unwrap();
+
+    let err = contract
+        .make_bid(&mut app, &sender, &[])
+        .unwrap_err();
+
+    assert_eq!(err,  ContractError::EmptyBid {});
+}
+
+#[test]
+fn bid_success() {
+    let owner = Addr::unchecked("owner");
+    let sender1 = Addr::unchecked("sender1");
+    let sender2 = Addr::unchecked("sender2");
+
+    let mut app = App::new(|router, _api, storage| {
+        router
+            .bank
+            .init_balance(storage, &sender1, coins(20, "atom"))
+            .unwrap();
+        router
+            .bank
+            .init_balance(storage, &sender2, coins(20, "atom"))
+            .unwrap();
+    });
+
+    let contract_id = BiddingContract::store_code(&mut app);
+
+    let contract = BiddingContract::instantiate(
+        &mut app,
+        contract_id,
+        &sender1,
+        &owner,
+        None,
+        None,
+        None,
+    ).unwrap();
+
+    contract
+        .make_bid(&mut app, &sender1, &coins(10, ATOM))
+        .unwrap();
+
+    assert_eq!(app.wrap().query_all_balances(sender1.clone()).unwrap(), coins(10, ATOM));
+    assert_eq!(app.wrap().query_all_balances(sender2.clone()).unwrap(), coins(20, ATOM));
+    assert_eq!(app.wrap().query_all_balances(contract.addr()).unwrap(), coins(9, ATOM));
+    assert_eq!(app.wrap().query_all_balances(owner.clone()).unwrap(), coins(1, ATOM));
+
+    let resp: BidsResponse = contract.query_bids(&app).unwrap();
+
+    assert_eq!(resp, BidsResponse { bids: vec![
+        Bid { address: sender1.clone(), coin: coin(9, ATOM) },
+        Bid { address: owner.clone(), coin: coin(0, ATOM) },
+    ] });
+
+    contract
+        .make_bid(&mut app, &sender2, &coins(12, ATOM))
+        .unwrap();
+
+    assert_eq!(app.wrap().query_all_balances(sender1.clone()).unwrap(), coins(10, ATOM));
+    assert_eq!(app.wrap().query_all_balances(sender2.clone()).unwrap(), coins(8, ATOM));
+    assert_eq!(app.wrap().query_all_balances(contract.addr()).unwrap(), coins(20, ATOM));
+    assert_eq!(app.wrap().query_all_balances(owner.clone()).unwrap(), coins(2, ATOM));
+
+    let resp: BidsResponse = contract.query_bids(&app).unwrap();
+
+    assert_eq!(resp, BidsResponse { bids: vec![
+        Bid { address: sender2.clone(), coin: coin(11, ATOM) },
+        Bid { address: sender1.clone(), coin: coin(9, ATOM) },
+        Bid { address: owner.clone(), coin: coin(0, ATOM) },
+    ] });
+
+    contract
+        .make_bid(&mut app, &sender1, &coins(10, ATOM))
+        .unwrap();
+
+    assert_eq!(app.wrap().query_all_balances(sender1.clone()).unwrap(), vec![]);
+    assert_eq!(app.wrap().query_all_balances(sender2.clone()).unwrap(), coins(8, ATOM));
+    assert_eq!(app.wrap().query_all_balances(contract.addr()).unwrap(), coins(29, ATOM));
+    assert_eq!(app.wrap().query_all_balances(owner.clone()).unwrap(), coins(3, ATOM));
+
+    let resp: BidsResponse = contract.query_bids(&app).unwrap();
+
+    assert_eq!(resp, BidsResponse { bids: vec![
+        Bid { address: sender1.clone(), coin: coin(18, ATOM) },
+        Bid { address: sender2.clone(), coin: coin(11, ATOM) },
+        Bid { address: owner.clone(), coin: coin(0, ATOM) },
+    ] });
 }

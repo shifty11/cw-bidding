@@ -1,10 +1,11 @@
-use cosmwasm_std::{Binary, coin, Deps, DepsMut, Env, MessageInfo, Response, StdResult, to_binary};
+use std::ops::Mul;
+use cosmwasm_std::{Binary, coin, Coin, Decimal, Deps, DepsMut, Env, MessageInfo, Response, StdResult, to_binary, Uint128};
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cw2::set_contract_version;
 
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::msg::{Bid, ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{BIDS, Config, CONFIG};
 
 // version info for migration info
@@ -44,22 +45,89 @@ pub fn instantiate(
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
-    _deps: DepsMut,
-    _env: Env,
-    _info: MessageInfo,
-    _msg: ExecuteMsg,
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
-    unimplemented!()
+    match msg {
+        ExecuteMsg::MakeBid {} => exec::make_bid(deps, env, info),
+        ExecuteMsg::Close {} => exec::close(deps, env, info),
+        ExecuteMsg::Retract { receiver } => exec::retract(deps, env, info, receiver),
+    }
 }
 
-pub mod exec {}
+pub mod exec {
+    use cosmwasm_std::{BankMsg, coin, DepsMut, Env, MessageInfo, Response};
+
+    use crate::{ContractError};
+    use crate::contract::{Commission, DENOM, query};
+    use crate::msg::Bid;
+    use crate::state::{BIDS, CONFIG};
+
+    pub fn make_bid(deps: DepsMut, _env: Env, info: MessageInfo) -> Result<Response, ContractError> {
+        let config = CONFIG.load(deps.storage)?;
+        if info.sender == config.owner {
+            return Err(ContractError::OwnerCannotBid {});
+        }
+
+        let fund = info.funds.iter().find(|coin| {
+            coin.denom == DENOM
+        });
+        if fund.is_none() {
+            return Err(ContractError::EmptyBid {});
+        }
+
+        let resp = query::query_bids(deps.as_ref())?;
+        let new_bid = Bid { address: info.sender.clone(), coin: fund.unwrap().clone() };
+        let summarized_bid: Bid = resp.bids.iter().find(|bid| {
+            bid.address == info.sender
+        }).map(|bid| {
+            let amount = bid.coin.amount + new_bid.amount_as_coin().amount;
+            Bid { address: info.sender.clone(), coin: coin(amount.u128(), DENOM) }
+        }).unwrap_or_else(|| {
+            let amount = new_bid.amount_as_coin().amount;
+            Bid { address: info.sender.clone(), coin: coin(amount.u128(), DENOM) }
+        });
+
+        let old_bid = resp.bids.first();
+        if old_bid.is_some() && old_bid.unwrap().address != info.sender.clone() {
+            if old_bid.unwrap().coin.amount >= summarized_bid.coin.amount {
+                return Err(ContractError::BidTooLow {
+                    amount: summarized_bid.coin.amount,
+                    required: old_bid.unwrap().coin.amount,
+                });
+            }
+        }
+
+        BIDS.save(deps.storage, info.sender.clone(), &summarized_bid.coin)?;
+        let bank_msg = BankMsg::Send {
+            to_address: config.owner.to_string(),
+            amount: vec![new_bid.commission_as_coin()],
+        };
+
+        let resp = Response::new()
+            .add_message(bank_msg)
+            .add_attribute("action", "bid")
+            .add_attribute("sender", info.sender.as_str());
+
+        Ok(resp)
+    }
+
+    pub fn close(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
+        unimplemented!()
+    }
+
+    pub fn retract(deps: DepsMut, env: Env, info: MessageInfo, receiver: Option<String>) -> Result<Response, ContractError> {
+        unimplemented!()
+    }
+}
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
-
     match msg {
         QueryMsg::Config {} => to_binary(&query::query_config(deps)?),
-        QueryMsg::Bids { } => to_binary(&query::query_bids(deps)?),
+        QueryMsg::Bids {} => to_binary(&query::query_bids(deps)?),
     }
 }
 
@@ -69,6 +137,7 @@ pub mod query {
 
     use crate::msg::{Bid, BidsResponse, ConfigResponse};
     use crate::state::{BIDS, CONFIG};
+    use itertools::Itertools;
 
     pub fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         let config = CONFIG.load(deps.storage)?;
@@ -76,8 +145,8 @@ pub mod query {
     }
 
     pub fn query_bids(deps: Deps) -> StdResult<BidsResponse> {
-        let bids = BIDS
-            .range(deps.storage, None, None, cosmwasm_std::Order::Ascending)
+        let mut bids: Vec<Bid> = BIDS
+            .range(deps.storage, None, None, cosmwasm_std::Order::Descending)
             .map(|item| {
                 let (address, coin) = item?;
                 Ok(Bid {
@@ -86,6 +155,37 @@ pub mod query {
                 })
             })
             .collect::<StdResult<_>>()?;
+        bids.sort_by(|a, b| {
+            b.coin.amount.cmp(&a.coin.amount)
+        });
         Ok(BidsResponse { bids })
+    }
+}
+
+
+const DEFAULT_COMMISSION: u64 = 10;
+
+pub trait Commission {
+    fn commission(&self) -> Decimal;
+    fn commission_as_coin(&self) -> Coin;
+    fn amount(&self) -> Decimal;
+    fn amount_as_coin(&self) -> Coin;
+}
+
+impl Commission for Bid {
+    fn commission(&self) -> Decimal {
+        Decimal::new(self.coin.amount) * Decimal::percent(DEFAULT_COMMISSION)
+    }
+
+    fn commission_as_coin(&self) -> Coin {
+        coin(self.commission().atomics().u128(), DENOM)
+    }
+
+    fn amount(&self) -> Decimal {
+        Decimal::new(self.coin.amount) - self.commission()
+    }
+
+    fn amount_as_coin(&self) -> Coin {
+        coin( self.amount().atomics().u128(), DENOM)
     }
 }

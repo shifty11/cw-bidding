@@ -10,7 +10,13 @@ pub struct InstantiateMsg {
 }
 
 #[cw_serde]
-pub enum ExecuteMsg {}
+pub enum ExecuteMsg {
+    MakeBid {},
+    Close {},
+    Retract {
+        receiver: Option<String>,
+    },
+}
 
 #[cw_serde]
 #[derive(QueryResponses)]

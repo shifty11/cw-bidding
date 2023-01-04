@@ -4,7 +4,7 @@ use cw_multi_test::ContractWrapper;
 
 use crate::contract::{execute, instantiate, query};
 use crate::error::ContractError;
-use crate::msg::{BidsResponse, ConfigResponse, InstantiateMsg, QueryMsg};
+use crate::msg::{BidsResponse, ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
 
 pub struct BiddingContract(Addr);
 
@@ -59,6 +59,18 @@ impl BiddingContract {
         )
             .map(BiddingContract)
             .map_err(|err| err.downcast().unwrap())
+    }
+
+    #[track_caller]
+    pub fn make_bid(
+        &self,
+        app: &mut App,
+        sender: &Addr,
+        funds: &[Coin],
+    ) -> Result<(), ContractError> {
+        app.execute_contract(sender.clone(), self.0.clone(), &ExecuteMsg::MakeBid {}, funds)
+            .map_err(|err| err.downcast().unwrap())
+            .map(|_| ())
     }
 
     #[track_caller]
