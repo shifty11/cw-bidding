@@ -17,4 +17,7 @@ pub enum ContractError {
 
     #[error("Bid is too low: amount {amount}; required {required}")]
     BidTooLow {amount: Uint128, required: Uint128},
+
+    #[error("No retractable bid")]
+    NoRectractableBid {},
 }

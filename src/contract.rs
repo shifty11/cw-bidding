@@ -1,5 +1,4 @@
-use std::ops::Mul;
-use cosmwasm_std::{Binary, coin, Coin, Decimal, Deps, DepsMut, Env, MessageInfo, Response, StdResult, to_binary, Uint128};
+use cosmwasm_std::{Binary, coin, Coin, Decimal, Deps, DepsMut, Env, MessageInfo, Response, StdResult, to_binary};
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cw2::set_contract_version;
@@ -132,7 +131,7 @@ pub mod exec {
         if highest_bid.is_some() && highest_bid.unwrap().coin.amount != Uint128::zero() {
             let bank_msg = BankMsg::Send {
                 to_address: info.sender.to_string(),
-                amount: vec![highest_bid.unwrap().coin.clone()],
+                amount: vec![highest_bid.unwrap().amount_as_coin()],
             };
 
             resp = resp.add_message(bank_msg);
@@ -141,8 +140,35 @@ pub mod exec {
         Ok(resp)
     }
 
-    pub fn retract(deps: DepsMut, env: Env, info: MessageInfo, receiver: Option<String>) -> Result<Response, ContractError> {
-        unimplemented!()
+    pub fn retract(deps: DepsMut, _env: Env, info: MessageInfo, receiver: Option<String>) -> Result<Response, ContractError> {
+        let receiver = receiver.unwrap_or_else(|| info.sender.to_string());
+        let validated_receiver = deps.api.addr_validate(&receiver)?;
+
+        let result = query::query_bids(deps.as_ref())?;
+        let split: Option<(&Bid, &[Bid])> = result.bids.split_first();
+        if split.is_none() {
+            return Err(ContractError::NoRectractableBid {});
+        }
+
+        let bid: &Bid = split.unwrap().1.iter().find(|bid| {
+            bid.address == info.sender
+        }).ok_or(ContractError::NoRectractableBid {})?;
+
+        if bid.coin.amount == Uint128::zero() {
+            return Err(ContractError::NoRectractableBid {});
+        }
+
+        let mut resp = Response::new()
+            .add_attribute("action", "retract")
+            .add_attribute("sender", info.sender.as_str());
+
+        let bank_msg = BankMsg::Send {
+            to_address: validated_receiver.to_string(),
+            amount: vec![coin(bid.amount_as_coin().amount.u128(), DENOM)],
+        };
+        resp = resp.add_message(bank_msg);
+
+        Ok(resp)
     }
 }
 
@@ -160,7 +186,6 @@ pub mod query {
 
     use crate::msg::{Bid, BidsResponse, ConfigResponse};
     use crate::state::{BIDS, CONFIG};
-    use itertools::Itertools;
 
     pub fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         let config = CONFIG.load(deps.storage)?;

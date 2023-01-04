@@ -228,6 +228,86 @@ fn bid_success() {
 
     assert_eq!(app.wrap().query_all_balances(sender1.clone()).unwrap(), vec![]);
     assert_eq!(app.wrap().query_all_balances(sender2.clone()).unwrap(), coins(8, ATOM));
-    assert_eq!(app.wrap().query_all_balances(contract.addr()).unwrap(), coins(9, ATOM));
-    assert_eq!(app.wrap().query_all_balances(owner.clone()).unwrap(), coins(23, ATOM));
+    assert_eq!(app.wrap().query_all_balances(contract.addr()).unwrap(), coins(11, ATOM));
+    assert_eq!(app.wrap().query_all_balances(owner.clone()).unwrap(), coins(21, ATOM));
+
+    let err = contract
+        .retract(&mut app, &sender1, None)
+        .unwrap_err();
+
+    assert_eq!(err,  ContractError::NoRectractableBid { });
+
+    let err = contract
+        .retract(&mut app, &owner, None)
+        .unwrap_err();
+
+    assert_eq!(err,  ContractError::NoRectractableBid { });
+
+    contract
+        .retract(&mut app, &sender2, None)
+        .unwrap();
+
+    assert_eq!(app.wrap().query_all_balances(sender1.clone()).unwrap(), vec![]);
+    assert_eq!(app.wrap().query_all_balances(sender2.clone()).unwrap(), coins(19, ATOM));
+    assert_eq!(app.wrap().query_all_balances(contract.addr()).unwrap(), vec![]);
+    assert_eq!(app.wrap().query_all_balances(owner.clone()).unwrap(), coins(21, ATOM));
+}
+
+#[test]
+fn retract_to_friend() {
+    let owner = Addr::unchecked("owner");
+    let sender1 = Addr::unchecked("sender1");
+    let sender2 = Addr::unchecked("sender2");
+    let recipient = Addr::unchecked("recipient");
+
+    let mut app = App::new(|router, _api, storage| {
+        router
+            .bank
+            .init_balance(storage, &sender1, coins(20, "atom"))
+            .unwrap();
+        router
+            .bank
+            .init_balance(storage, &sender2, coins(20, "atom"))
+            .unwrap();
+    });
+
+    let contract_id = BiddingContract::store_code(&mut app);
+
+    let contract = BiddingContract::instantiate(
+        &mut app,
+        contract_id,
+        &sender1,
+        &owner,
+        None,
+        None,
+        None,
+    ).unwrap();
+
+    contract
+        .make_bid(&mut app, &sender1, &coins(10, ATOM))
+        .unwrap();
+
+    contract
+        .make_bid(&mut app, &sender2, &coins(15, ATOM))
+        .unwrap();
+
+    assert_eq!(app.wrap().query_all_balances(sender1.clone()).unwrap(), coins(10, ATOM));
+    assert_eq!(app.wrap().query_all_balances(sender2.clone()).unwrap(), coins(5, ATOM));
+    assert_eq!(app.wrap().query_all_balances(recipient.clone()).unwrap(), vec![]);
+    assert_eq!(app.wrap().query_all_balances(contract.addr()).unwrap(), coins(23, ATOM));
+    assert_eq!(app.wrap().query_all_balances(owner.clone()).unwrap(), coins(2, ATOM));
+
+    contract
+        .close(&mut app, &owner)
+        .unwrap();
+
+    contract
+        .retract(&mut app, &owner, &recipient)
+        .unwrap();
+
+    assert_eq!(app.wrap().query_all_balances(sender1.clone()).unwrap(), coins(10, ATOM));
+    assert_eq!(app.wrap().query_all_balances(sender2.clone()).unwrap(), coins(5, ATOM));
+    assert_eq!(app.wrap().query_all_balances(recipient.clone()).unwrap(), coins(9, ATOM));
+    assert_eq!(app.wrap().query_all_balances(contract.addr()).unwrap(), vec![]);
+    assert_eq!(app.wrap().query_all_balances(owner.clone()).unwrap(), coins(1, ATOM));
 }

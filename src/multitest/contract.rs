@@ -85,6 +85,19 @@ impl BiddingContract {
     }
 
     #[track_caller]
+    pub fn retract<'a>(
+        &self,
+        app: &mut App,
+        sender: &Addr,
+        receiver: impl Into<Option<&'a Addr>>,
+    ) -> Result<(), ContractError> {
+        let receiver = receiver.into().map(Addr::to_string);
+        app.execute_contract(sender.clone(), self.0.clone(), &ExecuteMsg::Retract {receiver}, &[])
+            .map_err(|err| err.downcast().unwrap())
+            .map(|_| ())
+    }
+
+    #[track_caller]
     pub fn query_config(&self, app: &App) -> StdResult<ConfigResponse> {
         app.wrap()
             .query_wasm_smart(self.0.clone(), &QueryMsg::Config {})
