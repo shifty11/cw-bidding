@@ -58,7 +58,7 @@ pub fn execute(
 }
 
 pub mod exec {
-    use cosmwasm_std::{BankMsg, coin, DepsMut, Env, MessageInfo, Response};
+    use cosmwasm_std::{BankMsg, coin, DepsMut, Env, MessageInfo, Response, Uint128};
 
     use crate::{ContractError};
     use crate::contract::{Commission, DENOM, query};
@@ -83,10 +83,10 @@ pub mod exec {
         let summarized_bid: Bid = resp.bids.iter().find(|bid| {
             bid.address == info.sender
         }).map(|bid| {
-            let amount = bid.coin.amount + new_bid.amount_as_coin().amount;
+            let amount = bid.coin.amount + new_bid.coin.amount;
             Bid { address: info.sender.clone(), coin: coin(amount.u128(), DENOM) }
         }).unwrap_or_else(|| {
-            let amount = new_bid.amount_as_coin().amount;
+            let amount = new_bid.coin.amount;
             Bid { address: info.sender.clone(), coin: coin(amount.u128(), DENOM) }
         });
 
@@ -101,21 +101,44 @@ pub mod exec {
         }
 
         BIDS.save(deps.storage, info.sender.clone(), &summarized_bid.coin)?;
-        let bank_msg = BankMsg::Send {
-            to_address: config.owner.to_string(),
-            amount: vec![new_bid.commission_as_coin()],
-        };
 
-        let resp = Response::new()
-            .add_message(bank_msg)
+        let mut resp = Response::new()
             .add_attribute("action", "bid")
             .add_attribute("sender", info.sender.as_str());
+
+        if new_bid.commission_as_coin().amount > Uint128::zero() {
+            let bank_msg = BankMsg::Send {
+                to_address: config.owner.to_string(),
+                amount: vec![new_bid.commission_as_coin()],
+            };
+            resp = resp.add_message(bank_msg);
+        }
 
         Ok(resp)
     }
 
-    pub fn close(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
-        unimplemented!()
+    pub fn close(deps: DepsMut, _env: Env, info: MessageInfo) -> Result<Response, ContractError> {
+        let config = CONFIG.load(deps.storage)?;
+        if info.sender != config.owner {
+            return Err(ContractError::Unauthorized {});
+        }
+
+        let mut resp = Response::new()
+            .add_attribute("action", "close")
+            .add_attribute("sender", info.sender.as_str());
+
+        let result = query::query_bids(deps.as_ref())?;
+        let highest_bid = result.bids.first();
+        if highest_bid.is_some() && highest_bid.unwrap().coin.amount != Uint128::zero() {
+            let bank_msg = BankMsg::Send {
+                to_address: info.sender.to_string(),
+                amount: vec![highest_bid.unwrap().coin.clone()],
+            };
+
+            resp = resp.add_message(bank_msg);
+        }
+
+        Ok(resp)
     }
 
     pub fn retract(deps: DepsMut, env: Env, info: MessageInfo, receiver: Option<String>) -> Result<Response, ContractError> {

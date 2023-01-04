@@ -1,4 +1,4 @@
-use cosmwasm_std::{Addr, coin, coins};
+use cosmwasm_std::{Addr, coin, coins, Uint128};
 use cw_multi_test::App;
 
 use crate::error::ContractError;
@@ -172,7 +172,7 @@ fn bid_success() {
     let resp: BidsResponse = contract.query_bids(&app).unwrap();
 
     assert_eq!(resp, BidsResponse { bids: vec![
-        Bid { address: sender1.clone(), coin: coin(9, ATOM) },
+        Bid { address: sender1.clone(), coin: coin(10, ATOM) },
         Bid { address: owner.clone(), coin: coin(0, ATOM) },
     ] });
 
@@ -188,8 +188,8 @@ fn bid_success() {
     let resp: BidsResponse = contract.query_bids(&app).unwrap();
 
     assert_eq!(resp, BidsResponse { bids: vec![
-        Bid { address: sender2.clone(), coin: coin(11, ATOM) },
-        Bid { address: sender1.clone(), coin: coin(9, ATOM) },
+        Bid { address: sender2.clone(), coin: coin(12, ATOM) },
+        Bid { address: sender1.clone(), coin: coin(10, ATOM) },
         Bid { address: owner.clone(), coin: coin(0, ATOM) },
     ] });
 
@@ -205,8 +205,29 @@ fn bid_success() {
     let resp: BidsResponse = contract.query_bids(&app).unwrap();
 
     assert_eq!(resp, BidsResponse { bids: vec![
-        Bid { address: sender1.clone(), coin: coin(18, ATOM) },
-        Bid { address: sender2.clone(), coin: coin(11, ATOM) },
+        Bid { address: sender1.clone(), coin: coin(20, ATOM) },
+        Bid { address: sender2.clone(), coin: coin(12, ATOM) },
         Bid { address: owner.clone(), coin: coin(0, ATOM) },
     ] });
+
+    let err = contract
+        .make_bid(&mut app, &sender2, &coins(5, ATOM))
+        .unwrap_err();
+
+    assert_eq!(err,  ContractError::BidTooLow { amount: Uint128::new(17), required: Uint128::new(20) });
+
+    let err = contract
+        .close(&mut app, &sender2)
+        .unwrap_err();
+
+    assert_eq!(err,  ContractError::Unauthorized { });
+
+    contract
+        .close(&mut app, &owner)
+        .unwrap();
+
+    assert_eq!(app.wrap().query_all_balances(sender1.clone()).unwrap(), vec![]);
+    assert_eq!(app.wrap().query_all_balances(sender2.clone()).unwrap(), coins(8, ATOM));
+    assert_eq!(app.wrap().query_all_balances(contract.addr()).unwrap(), coins(9, ATOM));
+    assert_eq!(app.wrap().query_all_balances(owner.clone()).unwrap(), coins(23, ATOM));
 }

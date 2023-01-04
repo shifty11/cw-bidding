@@ -74,6 +74,17 @@ impl BiddingContract {
     }
 
     #[track_caller]
+    pub fn close(
+        &self,
+        app: &mut App,
+        sender: &Addr
+    ) -> Result<(), ContractError> {
+        app.execute_contract(sender.clone(), self.0.clone(), &ExecuteMsg::Close {}, &[])
+            .map_err(|err| err.downcast().unwrap())
+            .map(|_| ())
+    }
+
+    #[track_caller]
     pub fn query_config(&self, app: &App) -> StdResult<ConfigResponse> {
         app.wrap()
             .query_wasm_smart(self.0.clone(), &QueryMsg::Config {})
