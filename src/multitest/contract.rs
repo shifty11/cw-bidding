@@ -1,6 +1,5 @@
 use cosmwasm_std::{Addr, Coin, coin, coins, StdResult};
-use cw_multi_test::{App, BasicApp, Executor};
-use cw_multi_test::ContractWrapper;
+use cw_multi_test::{App, BasicApp, ContractWrapper, Executor};
 
 use crate::contract::{execute, instantiate, query};
 use crate::error::ContractError;

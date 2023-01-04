@@ -302,12 +302,12 @@ fn retract_to_friend() {
         .unwrap();
 
     contract
-        .retract(&mut app, &owner, &recipient)
+        .retract(&mut app, &sender1, &recipient)
         .unwrap();
 
     assert_eq!(app.wrap().query_all_balances(sender1.clone()).unwrap(), coins(10, ATOM));
     assert_eq!(app.wrap().query_all_balances(sender2.clone()).unwrap(), coins(5, ATOM));
     assert_eq!(app.wrap().query_all_balances(recipient.clone()).unwrap(), coins(9, ATOM));
     assert_eq!(app.wrap().query_all_balances(contract.addr()).unwrap(), vec![]);
-    assert_eq!(app.wrap().query_all_balances(owner.clone()).unwrap(), coins(1, ATOM));
+    assert_eq!(app.wrap().query_all_balances(owner.clone()).unwrap(), coins(16, ATOM));
 }
